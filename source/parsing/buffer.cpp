@@ -1,43 +1,57 @@
 #include "parsing/buffer.h"
-#include <stdexcept>
-#include <iostream>
 
-using namespace std;
+namespace BitTorrent {
 
-unsigned int getBE16(const buffer& b,buffer::size_type idx){
-    if(idx+1 >=b.size()) throw runtime_error("Index out of Bounds");
-    return (b[idx]<<8)+b[idx+1];
-}
-unsigned int getBE32(const buffer& b,buffer::size_type idx){
-    if(idx+3>=b.size()) throw runtime_error("Index out of bounds");
-    unsigned int ans=0;
-	for(int i=0;i<4;i++) {
-		ans <<= 8;
-		ans |= b[idx+i];
-	}
-	return ans;
-}
-buffer setBE16(unsigned int n,buffer& b,const buffer::size_type idx){
-    if(idx+1>=b.size()) throw runtime_error("Index out of bounds");
-    // need to know 0Xff
-    b[idx+1]=n&0xff;
-	b[idx]=(n>>8)&0xff;
-}
+    uint16_t BufferUtils::ReadBE16(const Buffer& b, size_t idx) {
+        if (idx + 1 >= b.size()) throw std::out_of_range("Buffer index out of bounds");
+        return (b[idx] << 8) | b[idx + 1];
+    }
 
-buffer setBE32(unsigned int n,buffer& b,const buffer::size_type idx) {
-	if(idx+3>=b.size()) throw runtime_error("Index out of bounds");
+    uint32_t BufferUtils::ReadBE32(const Buffer& b, size_t idx) {
+        if (idx + 3 >= b.size()) throw std::out_of_range("Buffer index out of bounds");
+        uint32_t ans = 0;
+        for (int i = 0; i < 4; i++) {
+            ans = (ans << 8) | b[idx + i];
+        }
+        return ans;
+    }
 
-	for(int i=0;i<4;i++) {
-		b[idx+3-i]=n&0xff;
-		n>>=8;
-	}
-}
+    uint64_t BufferUtils::ReadBE64(const Buffer& b, size_t idx) {
+        if (idx + 7 >= b.size()) throw std::out_of_range("Buffer index out of bounds");
+        uint64_t ans = 0;
+        for (int i = 0; i < 8; i++) {
+            ans = (ans << 8) | b[idx + i];
+        }
+        return ans;
+    }
 
-void print(const buffer& b) {
-	cout<<hex;
-	for(unsigned char c:b){
-		cout<<"0x"<<(unsigned int)c<<" ";
-	}
-    // ?dec
-	cout<<endl<<dec;
+    void BufferUtils::WriteBE16(Buffer& b, size_t idx, uint16_t n) {
+        if (idx + 1 >= b.size()) throw std::out_of_range("Buffer index out of bounds");
+        b[idx + 1] = n & 0xff;
+        b[idx] = (n >> 8) & 0xff;
+    }
+
+    void BufferUtils::WriteBE32(Buffer& b, size_t idx, uint32_t n) {
+        if (idx + 3 >= b.size()) throw std::out_of_range("Buffer index out of bounds");
+        for (int i = 0; i < 4; i++) {
+            b[idx + 3 - i] = n & 0xff;
+            n >>= 8;
+        }
+    }
+
+    void BufferUtils::WriteBE64(Buffer& b, size_t idx, uint64_t n) {
+        if (idx + 7 >= b.size()) throw std::out_of_range("Buffer index out of bounds");
+        for (int i = 0; i < 8; i++) {
+            b[idx + 7 - i] = n & 0xff;
+            n >>= 8;
+        }
+    }
+
+    void BufferUtils::PrintHex(const Buffer& b) {
+        for (auto byte : b) {
+            std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0') 
+                      << static_cast<int>(byte) << " ";
+        }
+        std::cout << std::dec << std::endl;
+    }
 }

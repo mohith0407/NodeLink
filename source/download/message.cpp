@@ -1,54 +1,58 @@
 #include "download/message.h"
-#include "download/peer_id.h"
+#include <cstring>
+#include <iterator>
 
-using namespace std;
+namespace BitTorrent {
 
-buffer message::build_handshake(const torrent& t){}
+    Buffer Message::BuildHandshake(const Torrent& t, const std::string& peer_id) {
+        Buffer packet;
+        // 1. PSTR Length (19)
+        packet.push_back(19);
+        // 2. PSTR ("BitTorrent protocol")
+        std::string pstr = "BitTorrent protocol";
+        packet.insert(packet.end(), pstr.begin(), pstr.end());
+        // 3. Reserved (8 zero bytes)
+        packet.insert(packet.end(), 8, 0);
+        // 4. Info Hash (20 bytes)
+        packet.insert(packet.end(), t.info_hash.begin(), t.info_hash.end());
+        // 5. Peer ID (20 bytes)
+        packet.insert(packet.end(), peer_id.begin(), peer_id.end());
+        
+        return packet;
+    }
 
-buffer message::build_keep_alive() return buffer(4);
+    Buffer Message::BuildRequest(uint32_t index, uint32_t begin, uint32_t length) {
+        // Format: <Length=13><ID=6><Index><Begin><Length>
+        Buffer packet(17);
+        BufferUtils::WriteBE32(packet, 0, 13); // Length
+        packet[4] = REQUEST;                   // ID
+        BufferUtils::WriteBE32(packet, 5, index);
+        BufferUtils::WriteBE32(packet, 9, begin);
+        BufferUtils::WriteBE32(packet, 13, length);
+        return packet;
+    }
 
-buffer message::build_choke(){
-	buffer b(5);
-	b[3]=1;
-	b[4]=0;
-	return b;
+    Buffer Message::BuildInterested() {
+        // Format: <Length=1><ID=2>
+        Buffer packet(5);
+        BufferUtils::WriteBE32(packet, 0, 1);
+        packet[4] = INTERESTED;
+        return packet;
+    }
+    
+    Buffer Message::BuildKeepAlive() {
+        Buffer packet(4);
+        BufferUtils::WriteBE32(packet, 0, 0);
+        return packet;
+    }
+
+    uint32_t Message::ReadMessageLength(const Buffer& b) {
+        if (b.size() < 4) return 0;
+        return BufferUtils::ReadBE32(b, 0);
+    }
+    
+    uint8_t Message::ReadMessageID(const Buffer& b) {
+        if (b.size() < 5) return 0; // Keep Alive has no ID
+        return b[4];
+    }
 }
-
-buffer message::build_unchoke(){
-	buffer b(5);
-	b[3]=1;
-	b[4]=1;
-	return b;
-}
-
-buffer message::build_interested(){
-	buffer b(5);
-	b[3]=1;
-	b[4]=2;
-	return b;
-}
-
-buffer message::build_not_interested(){
-	buffer b(5);
-	b[3]=1;
-	b[4]=3;
-	return b;
-}
-
-buffer message::build_have(const buffer& payload){
-	buffer b(9);
-	b[3]=5;
-	b[4]=4;
-	copy(payload.begin(), payload.end(), b.begin()+5);
-	return b;
-}
-
-buffer message::build_bitfield(const buffer& bitfield) {}
-
-buffer message::build_request(unsigned int index,unsigned int begin,unsigned int length){}
-
-buffer message::build_piece(unsigned int index,unsigned int begin,const buffer& block){} 
-
-buffer message::build_cancel(unsigned int index,unsigned int begin,unsigned int length){}
-
-buffer message::build_port(unsigned int port){}

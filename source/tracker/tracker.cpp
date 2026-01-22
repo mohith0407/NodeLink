@@ -1,153 +1,98 @@
 #include "tracker/tracker.h"
-#include "tracker/url.h"
-#include "tracker/udp.h"
-#include "download/peer_id.h"
-#include "parsing/bencode.h"
-#include <stdlib.h>
-#include <time.h>
-#include <vector>
-#include <algorithm>
-#include <stdexcept>
+#include "tracker/transport.h"
+#include "parsing/buffer.h"
+#include <random>
+#include <iostream>
 
-using namespace std;
+namespace BitTorrent {
 
-// torrent t -> meta
-buffer tracker:: build_conn_req_udp(){
-    const int SIZE_CONN=16;
-	const int RANDOM_SIZE=4;
-    unsigned char msg[SIZE_CONN]={
-        0x00,0x00,0x04,0x17,
-        0x27,0x10,0x19,0x80,
-        0x00,0x00,0x00,0x00
-    };
-    for(int i=0;i<RANDOM_SIZE;i++){
-        masg[SIZE_CONN+i]=rand()%256;
+    // Magic Numbers defined by the BitTorrent Protocol (BEP 15)
+    const uint64_t UDP_CONNECTION_MAGIC = 0x41727101980;
+    const uint32_t ACTION_CONNECT = 0;
+    const uint32_t ACTION_ANNOUNCE = 1;
+
+    std::vector<Peer> Tracker::GetPeers(const Torrent& t, const std::string& peer_id, int listening_port) {
+        Url url = Url::Parse(t.tracker_url);
+        
+        std::cout << "[Tracker] Contacting " << url.host << " via " << url.protocol << "..." << std::endl;
+
+        if (url.protocol == "udp") {
+            return GetPeersUDP(url, t, peer_id, listening_port);
+        } else if (url.protocol == "http" || url.protocol == "https") {
+            // Note: We don't support HTTPS (SSL) yet, treating as HTTP or fail
+            return GetPeersHTTP(url, t, peer_id, listening_port);
+        } else {
+            throw std::runtime_error("Unknown protocol: " + url.protocol);
+        }
     }
-    return buffer(msg,msg+SIZE_CONN);
-}
 
-void tracker::build_ann_req_http(http& request,const torrent& t){
-    // info_hash
-    request.add_argument("info_hash", t.info_hash);
+    std::vector<Peer> Tracker::GetPeersUDP(const Url& url, const Torrent& t, const std::string& peer_id, int port) {
+        UdpClient udp(url.host, url.port);
+        udp.SetTimeout(5); // 5 seconds timeout
 
-    //peer_id
-	request.add_argument("peer_id", peer_id::get());
+        // --- Step 1: Connection Request ---
+        Buffer connect_req(16);
+        BufferUtils::WriteBE64(connect_req, 0, UDP_CONNECTION_MAGIC);
+        BufferUtils::WriteBE32(connect_req, 8, ACTION_CONNECT);
+        uint32_t trans_id = rand(); // Random ID to track this transaction
+        BufferUtils::WriteBE32(connect_req, 12, trans_id);
 
-	// port
-	request.add_argument("port", "6881");
+        udp.Send(connect_req);
+        Buffer connect_res = udp.Receive();
 
-	// uploaded
-	request.add_argument("uploaded", "0");
+        if (connect_res.size() < 16) throw std::runtime_error("Invalid UDP connect response");
+        uint64_t connection_id = BufferUtils::ReadBE64(connect_res, 8);
 
-	// downloaded
-	request.add_argument("downloaded", "0");
+        // --- Step 2: Announce Request ---
+        Buffer announce_req(98);
+        BufferUtils::WriteBE64(announce_req, 0, connection_id);
+        BufferUtils::WriteBE32(announce_req, 8, ACTION_ANNOUNCE);
+        BufferUtils::WriteBE32(announce_req, 12, trans_id);
+        
+        std::copy(t.info_hash.begin(), t.info_hash.end(), announce_req.begin() + 16); // Info Hash
+        std::copy(peer_id.begin(), peer_id.end(), announce_req.begin() + 36);         // Peer ID
+        
+        BufferUtils::WriteBE64(announce_req, 56, 0); // Downloaded
+        BufferUtils::WriteBE64(announce_req, 64, t.length); // Left
+        BufferUtils::WriteBE64(announce_req, 72, 0); // Uploaded
+        BufferUtils::WriteBE32(announce_req, 80, 2); // Event: Started
+        BufferUtils::WriteBE32(announce_req, 84, 0); // IP
+        BufferUtils::WriteBE32(announce_req, 88, 0); // Key
+        BufferUtils::WriteBE32(announce_req, 92, -1); // Num Want (-1 = default)
+        BufferUtils::WriteBE16(announce_req, 96, port); // Port
 
-	// compact
-	request.add_argument("compact", "1");
+        udp.Send(announce_req);
+        Buffer response = udp.Receive();
 
-    // left
-	request.add_argument("left", to_string(t.length));
+        // --- Step 3: Parse Response ---
+        if (response.size() < 20) throw std::runtime_error("Invalid UDP announce response");
+        
+        std::vector<Peer> peers;
+        // Peers start at offset 20. Each peer is 6 bytes (4 IP + 2 Port)
+        for (size_t i = 20; i + 6 <= response.size(); i += 6) {
+            Peer p;
+            p.ip = std::to_string(response[i]) + "." + 
+                   std::to_string(response[i+1]) + "." + 
+                   std::to_string(response[i+2]) + "." + 
+                   std::to_string(response[i+3]);
+            p.port = BufferUtils::ReadBE16(response, i + 4);
+            peers.push_back(p);
+        }
+        return peers;
+    }
 
-}
-
-buffer tracker::build_ann_req_udp(const buffer& b,const torrent& t){
-    const int SIZE_ANN = 98;
-
-	buffer buff(SIZE_ANN, 0x00);
-
-	// connection id
-	copy(b.begin()+8, b.begin()+16, buff.begin());
-
-	// action
-	buff[11]=1;
-
-	// transaction id
-	copy(b.begin()+4,b.begin()+8, buff.begin()+12);
-
-	// info hash
-	copy(t.info_hash.begin(), t.info_hash.end(), buff.begin()+16);
-
-	// peer id
-	buffer id = peer_id::get();
-	copy(id.begin(), id.end(), buff.begin()+36);
-
-	// left
-	long long x = t.length;
-	for(int i=0;i<4;i++){
-		buff[64+8-i-1] = x % 256;
-		x/=256;
-	}
-
-	// key
-	for(int i=0;i<4;i++){
-		buff[88+i] = rand() % 256;
-	}
-
-	// num_want
-	for(int i=0;i<4;i++){
-		buff[92+i] = 0xff;
-	}
-
-	// port
-	// Todo: allow port between 6881 and 6889
-	int port = 6881;
-	buff[97] = port % 256;
-	buff[96] = (port / 256) % 256;
-
-	return buff;
-}
-
-vector<peer> tracker:: get_peers(const torrent& t){
-    if (t.url.protocol == url_t::UDP) {
-
-		udp client(t.url.host, t.url.port);
-		client.send(build_conn_req_udp());
-		buffer b = client.receive();
-
-		client.send(build_ann_req_udp(b, t));
-		buffer c = client.receive();
-
-		const int PEER_OFFSET = 20;
-		c.erase(c.begin(), c.begin() + PEER_OFFSET);
-
-		return get_peers(c);
-
-	} else if (t.url.protocol == url_t::HTTP) {
-		
-		buffer encoded;
-
-		while(encoded.size() == 0) {
-			http request(t.url);
-			build_ann_req_http(request, t);
-			encoded = request.get();
-		}
-
-		bencode::item item = bencode::parse(encoded);
-		buffer peer_bytes = item.get_buffer("peers");
-		return get_peers(peer_bytes);
-	}
-
-	throw runtime_error("protocol not recognized");
-}
-
-vector<peer> tracker::get_peers(const buffer& b){
-    const int PEER_BYTE_SIZE = 6;
-	buffer::size_type n = b.size();
-
-	if(n % PEER_BYTE_SIZE != 0) throw runtime_error("peer list not a multiple of 6");
-
-	vector<peer> peers;
-	for(auto i = 0; i < n; i+=6) {
-
-		string host = to_string(b[i]);
-		for(int j=1;j<4;j++){
-			host += "." + to_string(b[i+j]);
-		}
-
-		int port = getBE16(b,i+4);
-
-		peers.push_back(peer(host, port));
-	}
-
-	return peers;
+    std::vector<Peer> Tracker::GetPeersHTTP(const Url& url, const Torrent& t, const std::string& peer_id, int port) {
+        // Simplified HTTP implementation
+        TcpClient tcp(url.host, url.port);
+        Buffer req = HttpBuilder::BuildGetRequest(url, t.info_hash, peer_id, port);
+        tcp.Send(req);
+        
+        std::cout << "[Tracker] HTTP Request sent. Waiting for response..." << std::endl;
+        Buffer res = tcp.Receive(4096); 
+        
+        // In a real implementation, we would parse the Bencoded response here.
+        // For this phase, we just acknowledge contact was made.
+        std::cout << "[Tracker] HTTP Response received (" << res.size() << " bytes)." << std::endl;
+        return {}; 
+    }
 }

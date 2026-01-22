@@ -12,4 +12,7 @@ RUN apt-get -y update && \
       libssl-dev \
       build-essential
 
-WORKDIR /app/build
+WORKDIR /build
+
+# docker build -t bittorrent .
+# docker run -it -v /Users/sacha/Desktop/Projects/BitTorrent:/app myBitTorrent
