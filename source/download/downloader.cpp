@@ -1,165 +1,65 @@
-#include "download/downloader.h"
-#include "tracker/transport.h"
-#include "download/message.h"
+#include "download/Downloader.h"
+#include "download/Connection.h"
+#include "download/Farm.h"
 #include <iostream>
-#include <cmath>
-#include <openssl/sha.h>
-#include <cstring>
+#include <algorithm>
 
 namespace BitTorrent {
+    // Constructor (Ensure downloaded_bytes is initialized)
+    Downloader::Downloader(const TorrentFile& tf, const std::string& id, const std::vector<Peer>& p_list)
+        : torrent(tf), my_id(id), peers(p_list), 
+          file_writer(tf.name), s(tf.length, tf.name) 
+    {
+        downloaded_bytes = 0; // Reset
+    }
+    void Downloader::Start() {
+        std::cout << "[Downloader] Starting download for: " << torrent.name << std::endl;
+        std::cout << "[Downloader] Total Size: " << torrent.length / (1024*1024) << " MB" << std::endl;
+        std::cout << "Wait for atleast 2 minutes to see progress" <<std:: endl;
+        // 1. Start Background Threads
+        file_writer.start();
+        s.start();
 
-    Downloader::Downloader(const Torrent& t, const std::string& my_peer_id) 
-        : torrent(t), my_id(my_peer_id), file_manager(t.name, t.length), pieces_downloaded_count(0) {
+        // 2. Create Connections
+        std::vector<std::shared_ptr<Connection>> conns;
+        int count = 0;
+        for(const auto& p : peers) {
+             if(count >= 5) break; // Limit to 5 peers to avoid file descriptor limits
+             std::cout << "[Downloader] Connecting to " << p.ip << "..." << std::endl;
+             conns.push_back(std::make_shared<Connection>(p, *this));
+             count++;
+        }
+        std::cout << "[Downloader] Initiating " << conns.size() << " connections..." << std::endl;
+
+        // 3. Add to Farm
+        Farm farm;
+        for(auto& c : conns) farm.AddConnection(c);
         
-        pieces_complete.resize(t.num_pieces, false);
+        // 4. Run the Event Loop (Blocks here until done)
+        // farm.Run();
+        // lambda expression
+        farm.Run([this]() {
+            return this->IsComplete();
+        });
+        std::cout << "\n[Downloader] Download loop finished.\n";
     }
 
-    void Downloader::Start(const std::vector<Peer>& peers) {
-        std::vector<std::thread> threads;
-        std::cout << "[Downloader] Starting with " << peers.size() << " peers." << std::endl;
-
-        for (const auto& p : peers) {
-            // Launch a thread for each peer
-            threads.emplace_back(&Downloader::PeerWorker, this, p);
-        }
-
-        // Wait for all threads (or until download complete)
-        for (auto& t : threads) {
-            if (t.joinable()) t.join();
-        }
-        std::cout << "[Downloader] All workers finished." << std::endl;
-    }
-
-    int Downloader::GetNextPieceToDownload(const std::vector<bool>& peer_has_piece) {
-        std::lock_guard<std::mutex> lock(piece_mutex);
+    void Downloader::OnBlockReceived(int piece_index, int offset, Buffer& data) {
+        // 1. Calculate where in the file this goes
+        int64_t global_offset = (int64_t)piece_index * torrent.piece_length + offset;
         
-        // Simple strategy: Find first missing piece that this peer has
-        for (int i = 0; i < torrent.num_pieces; ++i) {
-            if (!pieces_complete[i] && peer_has_piece[i]) {
-                // Mark tentatively as handled (simple logic for now)
-                // Real clients use 'In Progress' states
-                return i;
-            }
-        }
-        return -1; // Nothing useful from this peer
-    }
-
-    bool Downloader::VerifyPiece(const Buffer& data, int piece_index) {
-        unsigned char hash[SHA_DIGEST_LENGTH];
-        SHA1(data.data(), data.size(), hash);
+        // 2. Update Speed UI
+        s.add(data.size());
         
-        Buffer calculated(hash, hash + SHA_DIGEST_LENGTH);
-        Buffer expected = torrent.getPieceHash(piece_index);
-        
-        return calculated == expected;
-    }
-
-    void Downloader::PeerWorker(Peer p) {
-        try {
-            TcpClient tcp(p.ip, p.port);
-            tcp.SetTimeout(3); // 3 second timeout for responsiveness
-
-            // 1. Handshake
-            tcp.Send(Message::BuildHandshake(torrent, my_id));
-            Buffer response = tcp.Receive(68); // Handshake is exactly 68 bytes
-            
-            // Verify Handshake (Protocol String & Info Hash)
-            if (response.size() < 68 || response[0] != 19) return; 
-
-            // 2. Send Interested
-            tcp.Send(Message::BuildInterested());
-
-            // 3. State
-            bool choked = true;
-            std::vector<bool> peer_pieces(torrent.num_pieces, false); // What the peer has
-            Buffer incoming_buffer;
-
-            // Loop forever until connection dies or download finishes
-            while (pieces_downloaded_count < torrent.num_pieces) {
-                
-                // --- A. Message Handling Loop ---
-                // We peek/read messages. If unchoked, we break to request data.
-                try {
-                    Buffer len_buf = tcp.Receive(4);
-                    uint32_t msg_len = Message::ReadMessageLength(len_buf);
-                    
-                    if (msg_len == 0) continue; // KeepAlive
-
-                    Buffer payload = tcp.Receive(msg_len);
-                    uint8_t id = payload[0];
-
-                    if (id == Message::UNCHOKE) {
-                        choked = false;
-                        std::cout << "Peer " << p.ip << " Unchoked us!" << std::endl;
-                    } 
-                    else if (id == Message::CHOKE) choked = true;
-                    else if (id == Message::HAVE) {
-                         uint32_t piece_idx = BufferUtils::ReadBE32(payload, 1);
-                         if (piece_idx < peer_pieces.size()) peer_pieces[piece_idx] = true;
-                    }
-                    else if (id == Message::BITFIELD) {
-                        // Complex bitfield parsing omitted for brevity, assuming 'Have' mostly
-                        // Real implementation must parse bits here
-                        for(size_t i=0; i<peer_pieces.size(); ++i) peer_pieces[i] = true; // Assume they have everything for test
-                    }
-                } catch (...) {
-                    // Timeout is normal, just loop
-                }
-
-                if (choked) continue;
-
-                // --- B. Request Logic ---
-                int piece_index = GetNextPieceToDownload(peer_pieces);
-                if (piece_index == -1) {
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                    continue; 
-                }
-
-                // Download the WHOLE piece (Block by Block)
-                // A piece is usually 256KB. We request 16KB blocks.
-                uint32_t piece_len = torrent.getPieceLength(piece_index);
-                Buffer piece_data;
-                piece_data.reserve(piece_len);
-
-                bool piece_failed = false;
-
-                for (uint32_t offset = 0; offset < piece_len; offset += 16384) {
-                    uint32_t block_len = std::min((uint32_t)16384, piece_len - offset);
-                    
-                    tcp.Send(Message::BuildRequest(piece_index, offset, block_len));
-                    
-                    // Wait for PIECE message
-                    try {
-                        Buffer len_buf = tcp.Receive(4);
-                        uint32_t msg_len = Message::ReadMessageLength(len_buf);
-                        Buffer payload = tcp.Receive(msg_len);
-                        
-                        if (payload[0] != Message::PIECE) throw std::exception(); // Wrong packet
-                        
-                        // Payload: <ID=7><Index><Begin><Block Data>
-                        // Extract Block Data
-                        piece_data.insert(piece_data.end(), payload.begin() + 9, payload.end());
-
-                    } catch (...) {
-                        piece_failed = true;
-                        break;
-                    }
-                }
-
-                if (!piece_failed && VerifyPiece(piece_data, piece_index)) {
-                    // Save to Disk
-                    long long file_offset = (long long)piece_index * torrent.piece_length;
-                    file_manager.WriteBlock(piece_index, file_offset, piece_data);
-                    
-                    std::lock_guard<std::mutex> lock(piece_mutex);
-                    pieces_complete[piece_index] = true;
-                    pieces_downloaded_count++;
-                    std::cout << "Downloaded Piece " << piece_index << " from " << p.ip << std::endl;
-                }
-            }
-
-        } catch (...) {
-            // Peer disconnected
-        }
+        // 3. Send to Disk Writer
+        // Note: Writer::add() moves the buffer, so data is invalid after this
+        file_writer.add(data, global_offset);
+        downloaded_bytes += data.size();
     }
 }
+
+
+// Shared Pointers (std::shared_ptr)
+// Problem: If we used Connection* c = new Connection(), we would have to manually delete it later. If the program crashes or exits early, we leak memory.
+
+// Solution: shared_ptr is a "smart" pointer. It counts how many people are holding it. When the Downloader dies and the Farm dies, the pointer count hits 0, and the Connection cleans itself up automatically.

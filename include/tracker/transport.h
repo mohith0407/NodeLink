@@ -1,44 +1,39 @@
-#ifndef TRANSPORT_H
-#define TRANSPORT_H
-
-#include "parsing/buffer.h"
+#pragma once
+#include "parsing/Buffer.h"
 #include <string>
 #include <vector>
-#include <stdexcept>
-#include <netinet/in.h>
 
 namespace BitTorrent {
 
-    // Abstract Base Class for Network Communication
+    // Base Class for Networking
     class Transport {
     protected:
-        int sock_fd = -1; 
-        bool is_connected = false;
+        int sock = -1;
+        std::string host;
+        int port;
 
     public:
-        // Constructor opens the socket
-        Transport(const std::string& host, int port, int type);
-        
-        // Destructor automatically closes the socket (RAII)
-        virtual ~Transport();
+        Transport(const std::string& h, int p) : host(h), port(p) {}
+        virtual ~Transport(); // Closes socket automatically
 
-        void Send(const Buffer& data);
-        Buffer Receive(size_t buffer_size = 2048);
-        
-        // Essential for UDP: Don't wait forever if packets get lost
+        virtual void Send(const Buffer& data) = 0;
+        virtual Buffer Receive(size_t buffer_size = 4096) = 0;
         void SetTimeout(int seconds);
+
+        int GetSocket() const { return sock; }
     };
 
-    // Specific implementation for TCP (Reliable, used for HTTP trackers)
     class TcpClient : public Transport {
     public:
         TcpClient(const std::string& host, int port);
+        void Send(const Buffer& data) override;
+        Buffer Receive(size_t buffer_size = 4096) override;
     };
 
-    // Specific implementation for UDP (Fast, used for standard Trackers)
     class UdpClient : public Transport {
     public:
         UdpClient(const std::string& host, int port);
+        void Send(const Buffer& data) override;
+        Buffer Receive(size_t buffer_size = 4096) override;
     };
 }
-#endif
