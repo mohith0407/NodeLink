@@ -68,7 +68,7 @@ namespace BitTorrent {
                 recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + 68);
                 handshake_done = true;
                 state = DOWNLOADING;
-                std::cout << "[Conn] Handshake OK! Sent Interested to " << peer.ip << std::endl;
+                // std::cout << "[Conn] Handshake OK! Sent Interested to " << peer.ip << std::endl;
                 socket->Send(Message::BuildInterested());
                 continue; 
             }
