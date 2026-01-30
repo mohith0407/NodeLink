@@ -50,6 +50,8 @@ namespace BitTorrent {
     Speed::~Speed() { 
         stop_flag = true; 
         if(t.joinable()) t.join(); 
+        cout << "\033[?25h"; // Show Cursor again
+        cout << "\n";
     }
 
     string Speed::FormatBytes(double bytes) {
@@ -66,12 +68,16 @@ namespace BitTorrent {
     }
 
     void Speed::start() {
-        // Clear screen once
+        // Clear screen and hide cursor
         cout << "\033[2J\033[1;1H"; 
+        cout << "\033[?25l"; // Hide Cursor
         
         t = thread([this](){
+            int spin_index = 0;
+            const char spinner[] = {'|', '/', '-', '\\'};
+
             while(!stop_flag) {
-                // Calculate Speed
+                // 1. Calculate Speed & Progress
                 size_t current = session_bytes.exchange(0);
                 double speed = current * 5.0; // 200ms refresh -> x5 for per second
 
@@ -79,29 +85,43 @@ namespace BitTorrent {
                 int percent = (int)(progress * 100);
                 if (percent > 100) percent = 100;
 
-                // Draw UI (ANSI Escape Codes)
-                int bar_width = 40;
+                // 2. Prepare Bar Dimensions
+                int bar_width = 50;
                 int pos = bar_width * progress;
                 if(pos > bar_width) pos = bar_width;
 
-                cout << "\033[H"; // Move Cursor Home
-                cout << "File: " << filename << "\n";
-                cout << "[";
+                // 3. Move Cursor Home (Don't clear whole screen, just overwrite)
+                cout << "\033[H"; 
+
+                // --- LINE 1: Filename & Status ---
+                cout << "\033[1;36m[ Downloading ]\033[0m " << filename << "\033[K\n"; 
+
+                // --- LINE 2: Progress Bar & Spinner ---
+                cout << "\033[1;33m["; // Yellow Color
                 for(int i=0; i<bar_width; ++i) {
-                    if(i < pos) cout << "=";
-                    else if(i==pos) cout << ">";
-                    else cout << " ";
+                    if (i < pos) cout << "#";      // Filled
+                    else if (i == pos) cout << ">"; // Tip
+                    else cout << ".";              // Empty
                 }
-                cout << "] " << percent << "%\n";
-                
-                cout << "Speed: " << FormatBytes(speed) << "/s   "
-                     << "Downloaded: " << FormatBytes(bytes_downloaded) << " / " << FormatBytes(total_bytes) 
-                     << "       \n"; // Spaces to clear line artifacts
+                cout << "]\033[0m " 
+                     << "\033[1;37m" << percent << "%\033[0m " 
+                     << "\033[1;35m" << spinner[spin_index] << "\033[0m" // Purple Spinner
+                     << "\033[K\n";
+
+                // --- LINE 3: Stats ---
+                cout << "\033[1;32mSpeed: \033[0m" << left << setw(12) << (FormatBytes(speed) + "/s")
+                     << " \033[1;34mDownloaded: \033[0m" << FormatBytes(bytes_downloaded) 
+                     << " / " << FormatBytes(total_bytes) 
+                     << "\033[K\n"; // Clear rest of line
+
+                // Rotate Spinner
+                spin_index = (spin_index + 1) % 4;
                 
                 this_thread::sleep_for(chrono::milliseconds(200));
             }
         });
     }
+
 }
 
 
