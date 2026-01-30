@@ -1,37 +1,45 @@
-#ifndef BUFFER_H
-#define BUFFER_H
-
+#pragma once
 #include <vector>
-#include <cstdint>
 #include <string>
+#include <cstdint> // for uint8_t, uint32_t
 #include <stdexcept>
-#include <iostream>
-#include <iomanip>
 
 namespace BitTorrent {
 
-    // "Buffer" is just a list of bytes (unsigned chars).
-    // We use a typedef to make the code easier to read.
+    // A Buffer is just a list of bytes.
     using Buffer = std::vector<uint8_t>;
 
     class BufferUtils {
     public:
-        // Reads a 16-bit integer (2 bytes) from Big Endian format
-        static uint16_t ReadBE16(const Buffer& b, size_t idx);
+        // Reads a 32-bit Integer (4 bytes) from a buffer in Big Endian
+        static uint32_t ReadBE32(const Buffer& buffer, size_t index) {
+            if (index + 4 > buffer.size()) throw std::out_of_range("Buffer read overflow");
+            return (buffer[index] << 24) | (buffer[index + 1] << 16) | 
+                   (buffer[index + 2] << 8) | buffer[index + 3];
+        }
+
+        // Reads a 16-bit Integer (2 bytes)
+        static uint16_t ReadBE16(const Buffer& buffer, size_t index) {
+            if (index + 2 > buffer.size()) throw std::out_of_range("Buffer read overflow");
+            return (buffer[index] << 8) | buffer[index + 1];
+        }
+
+        // Writes a 32-bit Integer
+        static void WriteBE32(Buffer& buffer, uint32_t value) {
+            buffer.push_back((value >> 24) & 0xFF);
+            buffer.push_back((value >> 16) & 0xFF);
+            buffer.push_back((value >> 8) & 0xFF);
+            buffer.push_back(value & 0xFF);
+        }
+
+        // Helper to convert std::string to Buffer
+        static Buffer FromString(const std::string& str) {
+            return Buffer(str.begin(), str.end());
+        }
         
-        // Reads a 32-bit integer (4 bytes)
-        static uint32_t ReadBE32(const Buffer& b, size_t idx);
-        
-        // Reads a 64-bit integer (8 bytes) - Essential for large file sizes
-        static uint64_t ReadBE64(const Buffer& b, size_t idx);
-        
-        // Writes integers back into the buffer in Big Endian
-        static void WriteBE16(Buffer& b, size_t idx, uint16_t n);
-        static void WriteBE32(Buffer& b, size_t idx, uint32_t n);
-        static void WriteBE64(Buffer& b, size_t idx, uint64_t n);
-        
-        // Debug helper to see raw hex values
-        static void PrintHex(const Buffer& b);
+        // Helper to convert Buffer to std::string (for printing)
+        static std::string ToString(const Buffer& buffer) {
+            return std::string(buffer.begin(), buffer.end());
+        }
     };
 }
-#endif

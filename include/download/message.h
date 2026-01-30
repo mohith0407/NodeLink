@@ -1,41 +1,37 @@
-#ifndef MESSAGE_H
-#define MESSAGE_H
-
-#include "parsing/buffer.h"
-#include "parsing/torrent.h"
+#pragma once
+#include <vector>
 #include <string>
+#include <cstdint>
+#include "parsing/Buffer.h"        
+#include "parsing/TorrentFile.h"   
 
 namespace BitTorrent {
 
     class Message {
     public:
-        enum ID {
-            CHOKE = 0,
-            UNCHOKE = 1,
-            INTERESTED = 2,
-            NOT_INTERESTED = 3,
-            HAVE = 4,
-            BITFIELD = 5,
-            REQUEST = 6,
-            PIECE = 7,
-            CANCEL = 8
-        };
+        // Standard BitTorrent Message IDs
+        static constexpr uint8_t CHOKE = 0;
+        static constexpr uint8_t UNCHOKE = 1;
+        static constexpr uint8_t INTERESTED = 2;
+        static constexpr uint8_t NOT_INTERESTED = 3;
+        static constexpr uint8_t HAVE = 4;
+        static constexpr uint8_t BITFIELD = 5;
+        static constexpr uint8_t REQUEST = 6;
+        static constexpr uint8_t PIECE = 7;
+        static constexpr uint8_t CANCEL = 8;
 
-        // Builds the initial handshake packet (Length 68 bytes)
-        static Buffer BuildHandshake(const Torrent& t, const std::string& peer_id);
-        
-        // Builds a request for a specific block of data
+        // --- Builders (Outgoing) ---
+        static Buffer BuildHandshake(const TorrentFile& t, const std::string& peer_id);
+        static Buffer BuildKeepAlive();
+        static Buffer BuildChoke();
+        static Buffer BuildUnchoke();
+        static Buffer BuildInterested();
         static Buffer BuildRequest(uint32_t index, uint32_t begin, uint32_t length);
         
-        // Simple state messages
-        static Buffer BuildInterested();
-        static Buffer BuildKeepAlive();
-
-        // Helper to read the message length prefix (4 bytes)
+        // --- Parsers (Incoming) ---
+        // Reads the 4-byte length prefix from a buffer
         static uint32_t ReadMessageLength(const Buffer& b);
-        
-        // Helper to parse the ID from a message
+        // Reads the Message ID (e.g., 7 for PIECE)
         static uint8_t ReadMessageID(const Buffer& b);
     };
 }
-#endif

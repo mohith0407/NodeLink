@@ -1,39 +1,40 @@
-#ifndef DOWNLOADER_H
-#define DOWNLOADER_H
-
-#include "tracker/tracker.h"
-#include "parsing/torrent.h"
-#include "download/file_manager.h"
+#pragma once
+#include "parsing/TorrentFile.h"
+#include "tracker/Peer.h"
+#include "download/Worker.h"
 #include <vector>
-#include <thread>
 #include <atomic>
-#include <mutex>
+#include <string>
 
 namespace BitTorrent {
 
     class Downloader {
     public:
-        Downloader(const Torrent& t, const std::string& my_peer_id);
-        void Start(const std::vector<Peer>& peers);
-
-    private:
-        Torrent torrent;
+        TorrentFile torrent;
         std::string my_id;
-        FileManager file_manager;
+        std::vector<Peer> peers;
         
-        // State
-        std::vector<bool> pieces_complete;
-        std::mutex piece_mutex;
-        std::atomic<int> pieces_downloaded_count;
+        // These are from Step 2
+        Writer file_writer;
+        Speed s;
+        void Start();
+        std::atomic<int> next_req_index{0};
+        std::atomic<long long> downloaded_bytes{0};
 
-        // Worker Function (Runs in a thread)
-        void PeerWorker(Peer p);
+        // Constructor
+        Downloader(const TorrentFile& tf, const std::string& id, const std::vector<Peer>& p_list);
 
-        // Helper to find the next missing piece safely
-        int GetNextPieceToDownload(const std::vector<bool>& peer_bitfield);
+        // Virtual methods allow us to Mock them in tests
+        virtual void OnBlockReceived(int piece_index, int offset, Buffer& data);
         
-        // Helper to verify hash
-        bool VerifyPiece(const Buffer& piece_data, int piece_index);
+        virtual int GetNextPieceToRequest() { 
+            int idx = next_req_index++;
+            if(idx >= torrent.piece_hashes.size()) return -1;
+            return idx;
+        }
+
+        bool IsComplete() {
+            return downloaded_bytes >= torrent.length;
+        }
     };
 }
-#endif
