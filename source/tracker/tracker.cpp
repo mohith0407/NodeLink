@@ -40,9 +40,7 @@ namespace BitTorrent {
         if (url.protocol == "http") {
             return GetPeersHTTP(url, tf, peer_id, port);
         } else if (url.protocol == "udp") {
-            std::cout << "[Tracker] UDP not fully implemented in this phase. Trying anyway..." << std::endl;
-             // Placeholder for UDP logic if we add it later
-             return {}; 
+            return GetPeersUDP(url,tf,peer_id,port);
         }
         throw std::runtime_error("Unsupported Tracker Protocol: " + url.protocol);
     }
@@ -96,7 +94,7 @@ namespace BitTorrent {
                 
                 // Case A: Binary String (Compact)
                 if (peersNode.IsString()) {
-                    std::string bin = peersNode.GetString();
+                    std::string bin = peersNode.ToString();
                     std::vector<Peer> peers;
                     for (size_t i = 0; i + 6 <= bin.length(); i += 6) {
                         

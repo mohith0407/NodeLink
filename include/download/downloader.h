@@ -21,6 +21,9 @@ namespace BitTorrent {
         std::atomic<int> next_req_index{0};
         std::atomic<long long> downloaded_bytes{0};
 
+        std::vector<uint8_t> piece_buffer; // Stores the current piece in RAM
+        int piece_bytes_received = 0;      // How many bytes of this piece we have
+        int current_piece_index = -1;      // Which piece we are building
         // Constructor
         Downloader(const TorrentFile& tf, const std::string& id, const std::vector<Peer>& p_list);
 

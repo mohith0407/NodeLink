@@ -45,11 +45,11 @@ namespace BitTorrent {
             BDict dict;
             while (index < data.size() && data[index] != 'e') {
                 // Keys must be strings
-                Bnode key = DecodeElement(data, index);
-                if (!key.IsString()) throw std::runtime_error("Dict key must be string");
-                
+                Bnode keyNode = DecodeElement(data, index);
+                if (!keyNode.IsString()) throw std::runtime_error("Dict key must be string");
+                std::string key = keyNode.ToString(); // Convert Key Buffer to std::string
                 Bnode val = DecodeElement(data, index);
-                dict[key.GetString()] = val;
+                dict[key] = val;
             }
             if (index >= data.size()) throw std::runtime_error("Unclosed Dictionary");
             index++; // skip 'e'
@@ -65,12 +65,14 @@ namespace BitTorrent {
             std::string lenStr(data.begin() + index, data.begin() + colon);
             long long len = std::stoll(lenStr);
             
-            index = colon + 1; // move past ':'
-            if (index + len > data.size()) throw std::runtime_error("String out of bounds");
+            size_t start = colon + 1;
+            if (start + len > data.size()) throw std::runtime_error("String length out of bounds");
 
-            std::string s(data.begin() + index, data.begin() + index + len);
-            index += len;
-            return Bnode(s);
+            // CHANGE: Copy into Buffer, not std::string
+            Buffer val(data.begin() + start, data.begin() + start + len);
+            
+            index = start + len;
+            return Bnode(val);
         }
 
         throw std::runtime_error("Unknown Bencode type");
@@ -84,7 +86,7 @@ namespace BitTorrent {
             out.insert(out.end(), s.begin(), s.end());
         }
         else if (node.IsString()) {
-            std::string val = node.GetString();
+            std::string val = node.ToString();
             std::string s = std::to_string(val.length()) + ":" + val;
             out.insert(out.end(), s.begin(), s.end());
         }

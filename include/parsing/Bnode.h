@@ -14,7 +14,7 @@ namespace BitTorrent {
     using BList = std::vector<Bnode>;
     using BDict = std::map<std::string, Bnode>;
     using BInt  = int64_t;
-    using BString = std::string; // We treat byte strings as std::string for simplicity
+    using BString = Buffer; // We treat byte strings as std::string for simplicity
 
     class Bnode {
     public:
@@ -40,11 +40,15 @@ namespace BitTorrent {
             return std::get<BInt>(value); 
         }
         
-        const BString& GetString() const { 
+        const Buffer& GetString() const { 
             if(!IsString()) throw std::runtime_error("Type mismatch: Expected String");
             return std::get<BString>(value); 
         }
-        
+        // Helper to convert to std::string (Good for 'announce' URL)
+        std::string ToString() const {
+            const Buffer& b = GetString();
+            return std::string(b.begin(), b.end());
+        }
         const BList& GetList() const { 
             if(!IsList()) throw std::runtime_error("Type mismatch: Expected List");
             return std::get<BList>(value); 

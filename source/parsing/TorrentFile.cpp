@@ -20,7 +20,7 @@ namespace BitTorrent {
         const auto& rootDict = root.GetDict();
 
         TorrentFile t;
-        t.announce = rootDict.at("announce").GetString();
+        t.announce = rootDict.at("announce").ToString();
 
         // 3. Process 'info' dictionary
         // We MUST keep 'info' as a Bnode to hash it later
@@ -28,7 +28,7 @@ namespace BitTorrent {
         const Bnode& infoNode = rootDict.at("info");
         const auto& infoDict = infoNode.GetDict();
 
-        t.name = infoDict.at("name").GetString();
+        t.name = infoDict.at("name").ToString();
         t.piece_length = infoDict.at("piece length").GetInt();
         
         // Handle Length (Single file mode for now)
@@ -39,11 +39,17 @@ namespace BitTorrent {
         }
 
         // 4. Extract Pieces (Split big string into 20-byte chunks)
-        std::string piecesBlob = infoDict.at("pieces").GetString();
-        if (piecesBlob.length() % 20 != 0) throw std::runtime_error("Invalid pieces length");
+        const Buffer& piecesBlob = infoDict.at("pieces").GetString();
+        if (piecesBlob.size() % 20 != 0) throw std::runtime_error("Invalid pieces length");
 
-        for (size_t i = 0; i < piecesBlob.length(); i += 20) {
-            t.piece_hashes.push_back(piecesBlob.substr(i, 20));
+        for (size_t i = 0; i < piecesBlob.size(); i += 20) {
+            // Store as raw string or hex string? 
+            // Your struct TorrentFile uses std::vector<std::string> piece_hashes;
+            // Let's keep that for now to avoid breaking Downloader, but construct it safely.
+            
+            std::string hashChunk(piecesBlob.begin() + i, 
+                                  piecesBlob.begin() + i + 20);
+            t.piece_hashes.push_back(hashChunk);
         }
 
         // 5. Calculate Info Hash (CRITICAL STEP)
