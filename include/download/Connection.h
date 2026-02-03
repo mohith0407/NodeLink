@@ -27,6 +27,7 @@ namespace BitTorrent {
         int current_piece = -1;
         int block_offset = 0;
 
+        std::vector<bool> peer_pieces; // True if peer has this piece
         Connection(Peer p, Downloader& d);
         
         void Connect();
@@ -36,7 +37,10 @@ namespace BitTorrent {
         int GetSocketFd() { 
             return socket ? socket->GetSocket() : -1; 
         }
-
+        bool HasPiece(int index) {
+        if (index >= peer_pieces.size()) return false;
+        return peer_pieces[index];
+    }
     private:
         void ProcessBuffer();   
         void RequestNextBlock(); 
