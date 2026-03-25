@@ -44,6 +44,8 @@ Once connected, the "Reactor" loop begins:
 3.  **Requesting Blocks:** We request specific blocks of data (16KB chunks) from the peer.
 4.  **Assembly:** As raw bytes arrive, they are verified against the SHA-1 hash and written to the correct offset in the file on disk.
 
+![demo](https://github.com/user-attachments/assets/ad9405e6-57be-4631-9f0f-df052b8df354)
+
 ---
 
 ## Build & Run Instructions
